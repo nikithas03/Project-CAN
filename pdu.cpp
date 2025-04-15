@@ -13,6 +13,8 @@
 #include <chrono>
 #include <random>
 #include <map>
+#include <termios.h>  // For non-blocking keyboard input
+#include <fcntl.h>
 
 const canid_t PDU_COMMAND_ID = 0xC77E00F1;
 const canid_t PDU_RESPONSE_ID = 0x18EFF1600;
@@ -138,6 +140,24 @@ private:
         boardTemperature = 25.0f + (totalCurrent * 0.5f) + tempNoise(gen);
         if (boardTemperature < -55.0f) boardTemperature = -55.0f;
         if (boardTemperature > 105.0f) boardTemperature = 105.0f;
+    }
+
+    void sendTestAlert(uint8_t channelId) {
+        struct can_frame alert;
+        memset(&alert, 0, sizeof(alert));
+        alert.can_id = PDU_ALERT_ID;
+        alert.can_dlc = 8;
+        alert.data[0] = 0x50;  // Alert opcode for trip
+        alert.data[1] = 0x01;  // Alert type (trip)
+        alert.data[2] = channelId;  // Channel to "trip"
+        write(canSocket, &alert, sizeof(struct can_frame));
+        std::cout << "Test Alert Sent: Channel " << (int)channelId << " tripped" << std::endl;
+
+        // Simulate trip state for consistency
+        if (channelId < 8) {
+            channels[channelId].isTripped = true;
+            channels[channelId].isOn = false;
+        }
     }
 
     void processChannelControl1(const struct can_frame& request) {
@@ -350,7 +370,6 @@ private:
         bool isTripped = false;
         bool isBattle = false;
         uint8_t groupId = 251;
-        bool sendAlert = false;
 
         if (element < 100) {
             if (element < 8) {
@@ -358,15 +377,6 @@ private:
                 isTripped = channels[element].isTripped;
                 isBattle = channels[element].isBattle;
                 groupId = channels[element].groupId;
-
-                // Check for overload and trip condition
-                if (isOn && !isBattle && channels[element].current > 25.0f) {
-                    channels[element].isTripped = true;
-                    channels[element].isOn = false;
-                    isOn = false;
-                    isTripped = true;
-                    sendAlert = true;
-                }
             } else {
                 status = CHANNEL_DOESNT_EXIST;
             }
@@ -409,20 +419,6 @@ private:
                   << ": On=" << isOn << ", Tripped=" << isTripped
                   << ", Battle=" << isBattle << ", Group=" << (groupId == 251 ? "None" : std::to_string(groupId - 100))
                   << ", Status=" << (int)status << std::endl;
-
-        // Send alert if channel tripped due to overload
-        if (sendAlert && element < 8) {
-            struct can_frame alert;
-            memset(&alert, 0, sizeof(alert));
-            alert.can_id = PDU_ALERT_ID;
-            alert.can_dlc = 8;
-            alert.data[0] = 0x50;  // Alert opcode for trip
-            alert.data[1] = 0x01;  // Alert type (trip)
-            alert.data[2] = element;  // Channel that tripped
-            write(canSocket, &alert, sizeof(struct can_frame));
-            std::cout << "Sent Overload Alert: Channel " << (int)element 
-                      << " tripped (Current=" << channels[element].current << "A)" << std::endl;
-        }
     }
 
     void processInputStatus(const struct can_frame& request) {
@@ -611,7 +607,38 @@ public:
             deviceAddress = addr;
         }
     }
+
+    // Expose sendTestAlert for main to call
+    void triggerTestAlert(uint8_t channelId) {
+        sendTestAlert(channelId);
+    }
 };
+
+// Non-blocking keyboard input function
+int kbhit() {
+    struct termios oldt, newt;
+    int ch;
+    int oldf;
+
+    tcgetattr(STDIN_FILENO, &oldt);
+    newt = oldt;
+    newt.c_lflag &= ~(ICANON | ECHO);
+    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
+    oldf = fcntl(STDIN_FILENO, F_GETFL, 0);
+    fcntl(STDIN_FILENO, F_SETFL, oldf | O_NONBLOCK);
+
+    ch = getchar();
+
+    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
+    fcntl(STDIN_FILENO, F_SETFL, oldf);
+
+    if (ch != EOF) {
+        ungetc(ch, stdin);
+        return 1;
+    }
+
+    return 0;
+}
 
 int main(int argc, char* argv[]) {
     std::string interface = "vcan0";
@@ -622,8 +649,20 @@ int main(int argc, char* argv[]) {
         std::cout << "Starting PDU Simulator on " << interface << "..." << std::endl;
         PduSimulator simulator(interface);
         simulator.start();
-        std::cout << "PDU Simulator running. Press Enter to exit." << std::endl;
-        std::cin.get();
+        std::cout << "PDU Simulator running. Press 'o' to send a test alert for channel 2, or Enter to exit." << std::endl;
+
+        while (true) {
+            if (kbhit()) {
+                char c = getchar();
+                if (c == 'o') {
+                    simulator.triggerTestAlert(2);  // Send alert for channel 2 when 'o' is pressed
+                } else if (c == '\n') {
+                    break;  // Exit on Enter
+                }
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Avoid busy-waiting
+        }
+
         simulator.stop();
     }
     catch (const std::exception& e) {
