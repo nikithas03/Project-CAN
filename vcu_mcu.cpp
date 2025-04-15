@@ -138,6 +138,8 @@ public:
             }
         };
         queue_message(msg);
+        std::cout << "RPDO1 sent: Speed = " << speed << ", Torque = " << torque
+                  << ", Enable = " << (int)enable << "\n";
     }
 
     void send_sdo_command(SDO_Command cmd, uint16_t index, uint8_t subindex, uint32_t data = 0) {
@@ -187,6 +189,8 @@ public:
             }
         };
         queue_message(msg);
+        std::cout << "RPDO1 sent: Speed = " << target_speed << ", Torque = " << torque_limit
+                  << ", Enable = " << (int)motor_enable << "\n";
     }
 
     void send_rpdo2(uint16_t max_speed, uint8_t regen_level, uint8_t assist_level) {
@@ -209,6 +213,8 @@ public:
             }
         };
         queue_message(msg);
+        std::cout << "RPDO2 sent: Max Speed = " << max_speed << ", Regen = " << (int)regen_level
+                  << ", Assist = " << (int)assist_level << "\n";
     }
 
     NMT_State get_nmt_state() const { return nmt_state_; }
@@ -266,8 +272,7 @@ private:
                     lock.unlock();
     
                     if (write(sockfd_, &msg.frame, sizeof(can_frame)) == sizeof(can_frame)) {
-                        std::cerr << "Sent CAN ID 0x" << std::hex << msg.frame.can_id 
-                                  << " (Priority: " << std::dec << int(msg.priority) << ")\n";
+                        // Removed redundant logging to avoid clutter
                     }
     
                     lock.lock();
@@ -307,8 +312,11 @@ private:
 
     void process_incoming_frame(const can_frame& frame) {
         const auto priority = get_receive_priority(frame.can_id);
-        std::cout << "Received CAN ID 0x" << std::hex << frame.can_id 
-                  << " (Priority: " << std::dec << int(priority) << ")\n";
+        // Skip logging for RPD01_ID (0x202)
+        if (frame.can_id != RPD01_ID) {
+            std::cout << "Received CAN ID 0x" << std::hex << frame.can_id 
+                      << " (Priority: " << std::dec << int(priority) << ")\n";
+        }
 
         switch (frame.can_id) {
             case EMCY_ID: handle_emergency(frame); break;

@@ -286,6 +286,7 @@ void send_heartbeat() {
     msg.len = 1;
     msg.data[0] = current_state;
     can_send(&msg);
+    std::cout << "Heartbeat sent: State = 0x" << std::hex << (int)current_state << std::dec << "\n";
 }
 
 void send_bootup_message() {
@@ -333,6 +334,8 @@ void send_tpdo1() {
     }
     
     can_send(&msg);
+    std::cout << "TPDO1 sent: RPM = " << OD.motor_rpm << ", Current = " << (int)OD.motor_current
+              << ", Temp = " << (int)OD.motor_temp << ", Speed = " << OD.motor_speed << "\n";
     last_tpdo1 = get_current_time_ms();
 }
 
@@ -372,6 +375,8 @@ void send_tpdo2() {
     }
     
     can_send(&msg);
+    std::cout << "TPDO2 sent: Voltage = " << OD.battery_voltage << ", Current = " << OD.battery_current
+              << ", SOC = " << (int)OD.battery_soc << ", Temp = " << (int)OD.controller_temp << "\n";
     last_tpdo2 = get_current_time_ms();
 }
 
@@ -501,11 +506,11 @@ void handle_rpdo1(CANMessage *msg) {
             case 0x2007:
                 switch(subindex) {
                     case 0x1A:
-                        OD.target_speed = (msg->data[pos] << 8) | msg->data[pos+1];
+                        OD.target_speed = (msg->data[pos] | (msg->data[pos+1] << 8));
                         pos += 2;
                         break;
                     case 0x1E:
-                        OD.torque_limit = (msg->data[pos] << 8) | msg->data[pos+1];
+                        OD.torque_limit = (msg->data[pos] | (msg->data[pos+1] << 8));
                         pos += 2;
                         break;
                     case 0x1D:
@@ -516,6 +521,8 @@ void handle_rpdo1(CANMessage *msg) {
                 break;
         }
     }
+    std::cout << "RPDO1 received: Speed = " << OD.target_speed << ", Torque = " << OD.torque_limit
+              << ", Enable = " << (int)OD.motor_enable << "\n";
 }
 
 void handle_rpdo2(CANMessage *msg) {
@@ -538,7 +545,7 @@ void handle_rpdo2(CANMessage *msg) {
             case 0x2003:
                 switch(subindex) {
                     case 0x26:
-                        OD.max_speed = (msg->data[pos] << 8) | msg->data[pos+1];
+                        OD.max_speed = (msg->data[pos] | (msg->data[pos+1] << 8));
                         pos += 2;
                         break;
                 }
@@ -561,6 +568,8 @@ void handle_rpdo2(CANMessage *msg) {
                 break;
         }
     }
+    std::cout << "RPDO2 received: Max Speed = " << OD.max_speed << ", Regen = " << (int)OD.regen_level
+              << ", Assist = " << (int)OD.assist_level << "\n";
 }
 
 void abort_response(CANMessage *response, uint8_t code1, uint8_t code2, uint8_t code3) {
@@ -591,14 +600,17 @@ void handle_sdo_request(CANMessage *msg) {
     response.data[3] = subindex;
 
     if ((cs & 0xE0) == 0x40) {
+        std::cout << "SDO Read Request from VCU - ID: 0x" << std::hex << msg->id 
+                  << ", Index: 0x" << index << ", Subindex: 0x" << static_cast<int>(subindex) 
+                  << std::dec << "\n";
         response.data[0] = 0x43;
         
         switch(index) {
             case 0x2004:
                 switch(subindex) {
                     case 0x08:
-                        response.data[4] = (OD.motor_rpm >> 8) & 0xFF;
-                        response.data[5] = OD.motor_rpm & 0xFF;
+                        response.data[4] = OD.motor_rpm & 0xFF;
+                        response.data[5] = (OD.motor_rpm >> 8) & 0xFF;
                         break;
                     case 0x07:
                         response.data[4] = OD.motor_current;
@@ -607,16 +619,16 @@ void handle_sdo_request(CANMessage *msg) {
                         response.data[4] = OD.motor_temp;
                         break;
                     case 0x09:
-                        response.data[4] = (OD.motor_speed >> 8) & 0xFF;
-                        response.data[5] = OD.motor_speed & 0xFF;
+                        response.data[4] = OD.motor_speed & 0xFF;
+                        response.data[5] = (OD.motor_speed >> 8) & 0xFF;
                         break;
                     case 0x0A:
-                        response.data[4] = (OD.battery_voltage >> 8) & 0xFF;
-                        response.data[5] = OD.battery_voltage & 0xFF;
+                        response.data[4] = OD.battery_voltage & 0xFF;
+                        response.data[5] = (OD.battery_voltage >> 8) & 0xFF;
                         break;
                     case 0x0B:
-                        response.data[4] = (OD.battery_current >> 8) & 0xFF;
-                        response.data[5] = OD.battery_current & 0xFF;
+                        response.data[4] = OD.battery_current & 0xFF;
+                        response.data[5] = (OD.battery_current >> 8) & 0xFF;
                         break;
                     case 0x0C:
                         response.data[4] = OD.battery_soc;
@@ -632,15 +644,15 @@ void handle_sdo_request(CANMessage *msg) {
             case 0x2007:
                 switch(subindex) {
                     case 0x1A:
-                        response.data[4] = (OD.target_speed >> 8) & 0xFF;
-                        response.data[5] = OD.target_speed & 0xFF;
+                        response.data[4] = OD.target_speed & 0xFF;
+                        response.data[5] = (OD.target_speed >> 8) & 0xFF;
                         break;
                     case 0x1D:
                         response.data[4] = OD.motor_enable;
                         break;
                     case 0x1E:
-                        response.data[4] = (OD.torque_limit >> 8) & 0xFF;
-                        response.data[5] = OD.torque_limit & 0xFF;
+                        response.data[4] = OD.torque_limit & 0xFF;
+                        response.data[5] = (OD.torque_limit >> 8) & 0xFF;
                         break;
                     default: 
                         abort_response(&response, 0x11, 0x09, 0x06);
@@ -650,8 +662,8 @@ void handle_sdo_request(CANMessage *msg) {
             case 0x2003:
                 switch(subindex) {
                     case 0x26:
-                        response.data[4] = (OD.max_speed >> 8) & 0xFF;
-                        response.data[5] = OD.max_speed & 0xFF;
+                        response.data[4] = OD.max_speed & 0xFF;
+                        response.data[5] = (OD.max_speed >> 8) & 0xFF;
                         break;
                     default: 
                         abort_response(&response, 0x11, 0x09, 0x06);
@@ -683,6 +695,9 @@ void handle_sdo_request(CANMessage *msg) {
         }
     }
     else if ((cs & 0xE0) == 0x20) {
+        std::cout << "SDO Write Request from VCU - ID: 0x" << std::hex << msg->id 
+                  << ", Index: 0x" << index << ", Subindex: 0x" << static_cast<int>(subindex) 
+                  << std::dec << "\n";
         uint8_t size = 4 - ((cs >> 2) & 0x03);
         uint32_t data = 0;
         memcpy(&data, &msg->data[4], 4);
